@@ -150,6 +150,8 @@ sub testrun {
             1, 1
         );
     }
+
+    return $self->smtp->transport;
 }
 
 1;
