@@ -134,6 +134,8 @@ sub verify {
 
 sub testrun {
     my ( $self, $campaign, $email ) = @_;
+    return unless $email =~ /\@duckduckgo\.com$/;
+
     my $subscriber = DDGC::Schema::Result::Subscriber->new( {
         email_address => $email,
         campaign      => $campaign,
