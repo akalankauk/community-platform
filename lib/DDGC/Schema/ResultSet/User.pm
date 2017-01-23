@@ -51,7 +51,7 @@ sub handle_bounces {
              if $message->{complaint}->{complainedRecipients};
         for my $email ( @emails ) {
             my $users = $self->search(\[ 'LOWER( email ) = ?', lc( $email ) ]);
-            $users->update({ email_verified => 0 }) if $users;
+            $users->update({ email_verified => 0 }) if $users->one_row;
         }
     }
     return { ok => 1 };
