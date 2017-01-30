@@ -13,17 +13,13 @@ has campaigns => ( is => 'lazy' );
 sub _build_campaigns {
     {
         'a' => {
+            single_opt_in => 1,
             live => 1,
             verify => {
-                subject => 'Privacy Newsletter | DuckDuckGo',
-                template => 'email/a/v.tx'
+                subject => 'Tracking in Incognito?',
+                template => 'email/a/1.tx'
             },
             mails => {
-                1 => {
-                    days     => 1,
-                    subject  => 'Tracking In Incognito?',
-                    template => 'email/a/1.tx',
-                },
                 2 => {
                     days     => 2,
                     subject  => 'Are Ads Following You?',
@@ -60,7 +56,7 @@ sub _build_campaigns {
 }
 
 sub email {
-    my ( $self, $log, $subscriber, $subject, $template, $verified, $nolog ) = @_;
+    my ( $self, $log, $subscriber, $subject, $template, $verified, $nolog, $extra ) = @_;
 
     my $status = $self->smtp->send( {
         to       => $subscriber->email_address,
@@ -71,12 +67,15 @@ sub email {
         template => $template,
         content  => {
             subscriber => $subscriber,
+            $extra ? %{ $extra } : (),
         }
     } );
 
     if ( $status->{ok} && !$nolog ) {
         $subscriber->update_or_create_related( 'logs', { email_id => $log } );
     }
+
+    return $status;
 }
 
 sub execute {
@@ -89,6 +88,7 @@ sub execute {
                 ->campaign( $campaign )
                 ->subscribed
                 ->verified
+                ->unbounced
                 ->mail_unsent( $campaign, $mail )
                 ->by_days_ago( $self->campaigns->{ $campaign }->{mails}->{ $mail }->{days} )
                 ->all;
@@ -114,7 +114,7 @@ sub verify {
         next if !$self->campaigns->{ $campaign }->{live};
         my @subscribers = rset('Subscriber')
             ->campaign( $campaign )
-            ->unverified
+            ->unverified( $self->campaigns->{ $campaign }->{single_opt_in} )
             ->verification_mail_unsent_for( $campaign )
             ->all;
 
@@ -135,12 +135,19 @@ sub verify {
 sub testrun {
     my ( $self, $campaign, $email ) = @_;
     return unless $email =~ /\@duckduckgo\.com$/;
+    my $junk = time;
 
     my $subscriber = DDGC::Schema::Result::Subscriber->new( {
         email_address => $email,
         campaign      => $campaign,
         verified      => 1,
     } );
+
+    $self->email('v', $subscriber,
+                 $self->campaigns->{ $campaign }->{verify}->{subject},
+                 $self->campaigns->{ $campaign }->{verify}->{template},
+                 1, 1, { getjunk => $junk }
+    );
 
     my $mails = $self->campaigns->{ $campaign }->{mails};
     for my $mail ( keys $mails ) {
@@ -149,11 +156,26 @@ sub testrun {
             $subscriber,
             $mails->{ $mail }->{subject},
             $mails->{ $mail }->{template},
-            1, 1
+            1, 1,
+            {
+                getjunk => $junk
+            }
         );
     }
 
     return $self->smtp->transport;
+}
+
+sub add {
+    my ( $self, $params ) = @_;
+    my $email = Email::Valid->address($params->{email});
+    return unless $email;
+    return rset('Subscriber')->create( {
+        email_address => $email,
+        campaign      => $params->{campaign},
+        flow          => $params->{flow},
+        verified      => $self->campaigns->{ $params->{campaign} }->{single_opt_in},
+    } );
 }
 
 1;
