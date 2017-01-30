@@ -4,6 +4,8 @@ use warnings;
 BEGIN {
     $ENV{DDGC_DB_DSN} = 'dbi:SQLite:dbname=ddgc_test.db';
     $ENV{DDGC_MAIL_TEST} = 1;
+    $ENV{DDGC_BASIC_AUTH_USER} = 'mailuser';
+    $ENV{DDGC_BASIC_AUTH_PASS} = 'cE8cgcEoyscVr7YnwHrfjxa1RRyLVHMns';
 }
 
 
@@ -17,6 +19,7 @@ use DDGC::Web::App::Subscriber;
 use DDGC::Base::Web::Light;
 use DDGC::Util::Script::SubscriberMailer;
 use URI;
+use MIME::Base64 'encode_base64url';
 
 t::lib::DDGC::TestUtils::deploy( { drop => 1 }, schema );
 my $m = DDGC::Util::Script::SubscriberMailer->new;
@@ -105,4 +108,30 @@ test_psgi $app => sub {
     is( $transport->delivery_count, 0, 'Emails not re-sent' );
 };
 
+test_psgi $app => sub {
+    my ( $cb ) = @_;
+
+    my $creds = encode_base64url("$ENV{DDGC_BASIC_AUTH_USER}:$ENV{DDGC_BASIC_AUTH_PASS}");
+    my $badcreds = encode_base64url('baduser:baspassword');
+
+    is( $cb->( GET '/s/testrun/a' )->code, 401,
+        'Cannot get testrun form without credentials' );
+    is( $cb->( GET '/s/testrun/a', Authorization => "Basic $badcreds" )->code, 401,
+        'Cannot get testrun form with incorrect credentials' );
+    is( $cb->( GET '/s/testrun/a', Authorization => "Basic $creds" )->code, 200,
+        'Can get testrun form with correct credentials' );
+
+    is( $cb->( POST '/s/testrun/a' )->code, 401,
+        'Cannot POST to testrun without credentials' );
+    is( $cb->( POST '/s/testrun/a', Authorization => "Basic $badcreds" )->code, 401,
+        'Cannot POST to testrun with incorrect credentials' );
+
+    my $req = POST '/s/testrun/a';
+    $req->authorization_basic( $ENV{DDGC_BASIC_AUTH_USER}, $ENV{DDGC_BASIC_AUTH_PASS} );
+    $req->content('email=emailaddress%40duckduckgo.com');
+    is( $cb->( $req )->content, 'OK', 'testrun accepts a DDG address' );
+
+};
+
 done_testing;
+
